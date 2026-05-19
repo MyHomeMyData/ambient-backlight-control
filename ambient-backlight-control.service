@@ -1,0 +1,14 @@
+[Unit]
+Description=Ambient Backlight Control Daemon
+Documentation=https://github.com/MyHomeMyData/ambient-backlight-control
+After=graphical-session.target iio-sensor-proxy.service
+Wants=iio-sensor-proxy.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/.local/lib/ambient-backlight-control/ambient-backlight-control.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
