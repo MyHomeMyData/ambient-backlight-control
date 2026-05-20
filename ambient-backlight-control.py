@@ -189,6 +189,7 @@ class Daemon:
         self._poll_ms = int(als_cfg.getfloat("poll_interval") * 1000)
         self._smoothing = als_cfg.getint("smoothing_samples")
         self._offset_step = int(display_cfg.getfloat("manual_offset_step") * self._b_max)
+        self._offset_limit = int(display_cfg.getfloat("manual_offset_limit") * self._b_max)
         self._kbd_on_thr = kbd_cfg.getfloat("kbd_backlight_on_threshold")
         self._kbd_off_thr = kbd_cfg.getfloat("kbd_backlight_off_threshold")
         self._kbd_max = kbd_cfg.getint("kbd_backlight_max")
@@ -218,6 +219,7 @@ class Daemon:
     def _load_offset(self) -> int:
         try:
             value = int(OFFSET_FILE.read_text().strip())
+            value = max(-self._offset_limit, min(self._offset_limit, value))
             log.info("Restored offset: %+d", value)
             return value
         except (FileNotFoundError, ValueError):
@@ -234,8 +236,8 @@ class Daemon:
 
     def _on_offset_change(self, delta: int) -> None:
         with self._offset_lock:
-            span = self._b_max - self._b_min
-            self._offset = max(-span, min(span, self._offset + delta))
+            self._offset = max(-self._offset_limit,
+                               min(self._offset_limit, self._offset + delta))
             new_offset = self._offset
         self._save_offset(new_offset)
         log.info("Manual offset: %+d (delta %+d)", new_offset, delta)

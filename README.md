@@ -165,6 +165,12 @@ offset    # Persistent manual brightness offset (integer, restored on daemon sta
 
 ## Changelog
 
+### v0.1.1 — 2026-05-20 — Configurable offset limit
+
+- Added `manual_offset_limit` to `config.ini` (default: ±25% of `brightness_max`)
+- Offset is now clamped to this absolute limit in addition to the brightness range
+- Stored offset is clamped to the configured limit on daemon start
+
 ### v0.1.0 — 2026-05-19 — Initial version
 
 - Smooth, gamma-corrected brightness curve (ALS → display brightness)
