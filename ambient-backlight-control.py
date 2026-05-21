@@ -201,6 +201,7 @@ class Daemon:
         self._offset_lock = threading.Lock()
         self._kbd_on = self._hw.read_kbd() > 0
         self._suspended = False
+        self._screen_blanked = False
         self._als_history: list[float] = []
 
         self._sensor_proxy = None
@@ -279,15 +280,16 @@ class Daemon:
         )
         self._target = max(self._b_min, min(self._b_max, raw_target + offset))
 
-        # Keyboard backlight hysteresis
-        if self._kbd_on and als > self._kbd_off_thr:
-            self._hw.write_kbd(0)
-            self._kbd_on = False
-            log.info("Keyboard backlight OFF (ALS=%.1f)", als)
-        elif not self._kbd_on and als < self._kbd_on_thr:
-            self._hw.write_kbd(self._kbd_max)
-            self._kbd_on = True
-            log.info("Keyboard backlight ON (ALS=%.1f)", als)
+        # Keyboard backlight hysteresis — skip while screen is blanked
+        if not self._screen_blanked:
+            if self._kbd_on and als > self._kbd_off_thr:
+                self._hw.write_kbd(0)
+                self._kbd_on = False
+                log.info("Keyboard backlight OFF (ALS=%.1f)", als)
+            elif not self._kbd_on and als < self._kbd_on_thr:
+                self._hw.write_kbd(self._kbd_max)
+                self._kbd_on = True
+                log.info("Keyboard backlight ON (ALS=%.1f)", als)
 
         return GLib.SOURCE_CONTINUE
 
@@ -305,7 +307,7 @@ class Daemon:
     # ── Suspend / resume ──────────────────────────────────────────────────────
 
     def _on_prepare_for_sleep(
-        self, connection, sender, path, iface, signal_name, params, user_data
+        self, _connection, _sender, _path, _iface, _signal_name, params, _user_data
     ) -> None:
         """
         Called by systemd-logind via D-Bus before suspend and after resume.
@@ -325,6 +327,29 @@ class Daemon:
             log.info("Resumed — clearing ALS history, forcing re-read")
             self._suspended = False
             self._als_history.clear()
+
+    # ── Screen blank / unblank ───────────────────────────────────────────────
+
+    def _on_screensaver_changed(
+        self, connection, sender, path, iface, signal_name, params, user_data
+    ) -> None:
+        """
+        Called by org.cinnamon.ScreenSaver when the screen blanks or unblanks.
+        params is a GLib.Variant of type (b,): True = blanked, False = active again.
+        """
+        active = params.get_child_value(0).get_boolean()
+        if active:
+            log.info("Screen blanked — keyboard backlight off")
+            self._screen_blanked = True
+            self._hw.write_kbd(0)
+            self._kbd_on = False
+        else:
+            log.info("Screen unblanked — keyboard backlight off, re-evaluating on next poll")
+            self._screen_blanked = False
+            # Force hardware to known state — firmware may have changed it during suspend.
+            # _on_poll will turn it back on within 1s if ALS is below the threshold.
+            self._hw.write_kbd(0)
+            self._kbd_on = False
 
     # ── POSIX signal handling ─────────────────────────────────────────────────
 
@@ -357,10 +382,9 @@ class Daemon:
                  self._sensor_proxy.LightLevelUnit,
                  self._sensor_proxy.LightLevel)
 
-        # Subscribe to logind PrepareForSleep via raw Gio D-Bus connection.
-        # This reuses the GLib main loop that GIO and dasbus share internally.
-        gio_conn = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
-        gio_conn.signal_subscribe(
+        # Subscribe to logind PrepareForSleep (system bus)
+        gio_system = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+        gio_system.signal_subscribe(
             sender="org.freedesktop.login1",
             interface_name="org.freedesktop.login1.Manager",
             member="PrepareForSleep",
@@ -368,6 +392,19 @@ class Daemon:
             arg0=None,
             flags=Gio.DBusSignalFlags.NONE,
             callback=self._on_prepare_for_sleep,
+            user_data=None,
+        )
+
+        # Subscribe to Cinnamon screensaver ActiveChanged (session bus)
+        gio_session = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        gio_session.signal_subscribe(
+            sender="org.cinnamon.ScreenSaver",
+            interface_name="org.cinnamon.ScreenSaver",
+            member="ActiveChanged",
+            object_path="/org/cinnamon/ScreenSaver",
+            arg0=None,
+            flags=Gio.DBusSignalFlags.NONE,
+            callback=self._on_screensaver_changed,
             user_data=None,
         )
 

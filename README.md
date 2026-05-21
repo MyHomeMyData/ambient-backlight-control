@@ -13,8 +13,8 @@ this daemon fills that gap.
 
 - Smooth, perceptually linear brightness curve (no fixed steps)
 - Manual brightness offset via keyboard brightness keys (Fn+F5 / Fn+F6)
-- Keyboard backlight on/off with hysteresis
-- Correct resume-from-suspend handling via D-Bus
+- Keyboard backlight on/off with hysteresis, off when screen blanks
+- Correct resume-from-suspend and screen-unblank handling via D-Bus
 - All parameters configurable in a single `config.ini` file
 - No root required at runtime (udev rules handle sysfs permissions)
 
@@ -164,6 +164,13 @@ offset    # Persistent manual brightness offset (integer, restored on daemon sta
 ---
 
 ## Changelog
+
+### v0.1.2 — 2026-05-21 — Screen-blank keyboard backlight
+
+- Keyboard backlight is now turned off when the screen blanks (idle timeout or screensaver)
+- On unblank, keyboard backlight state is forced off and re-evaluated on the next poll cycle —
+  prevents firmware from leaving the backlight on in a bright environment after resume
+- Implemented via `org.cinnamon.ScreenSaver` D-Bus signal (`ActiveChanged`, session bus)
 
 ### v0.1.1 — 2026-05-20 — Configurable offset limit
 
